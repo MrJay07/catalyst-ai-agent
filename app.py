@@ -34,8 +34,15 @@ def extract_text_from_pdf(uploaded_file) -> str:
         st.error("pypdf is required to parse PDFs. Run: pip install pypdf")
         return ""
 
-    reader = PdfReader(io.BytesIO(uploaded_file.read()))
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
+    try:
+        # getvalue() avoids empty reads on reruns caused by file pointer state.
+        pdf_bytes = uploaded_file.getvalue()
+        if not pdf_bytes:
+            return ""
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception:
+        return ""
 
 
 def render_score_gauge(score: float) -> None:
@@ -59,6 +66,29 @@ def render_score_gauge(score: float) -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def format_analysis_error(exc: Exception) -> str:
+    """Return a user-friendly message for common provider/API errors."""
+    text = str(exc)
+    lower = text.lower()
+
+    if "insufficient_quota" in lower or "exceeded your current quota" in lower:
+        return (
+            "OpenAI quota has been exceeded for this API key. "
+            "Check your OpenAI billing/usage, then retry."
+        )
+
+    if "rate limit" in lower or "error code: 429" in lower:
+        return "OpenAI rate limit reached. Please wait a moment and try again."
+
+    if "invalid_api_key" in lower or "incorrect api key" in lower:
+        return "OPENAI_API_KEY appears invalid. Update your .env file and retry."
+
+    if "authentication" in lower or "401" in lower:
+        return "OpenAI authentication failed. Verify OPENAI_API_KEY and account access."
+
+    return f"An unexpected error occurred: {text}"
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +162,7 @@ def main() -> None:
                 st.error(str(exc))
                 st.stop()
             except Exception as exc:
-                st.error(f"An unexpected error occurred: {exc}")
+                st.error(format_analysis_error(exc))
                 st.stop()
 
         # ── Store results in session state so they persist on rerun ─────────

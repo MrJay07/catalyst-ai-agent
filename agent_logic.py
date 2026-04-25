@@ -17,8 +17,8 @@ import re
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
-from langchain.schema.output_parser import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
 load_dotenv()
 
@@ -38,10 +38,51 @@ def _build_llm(model: str = "gpt-4o-mini", temperature: float = 0.3) -> ChatOpen
 
 
 def _parse_json_block(text: str) -> dict | list:
-    """Extract and parse a JSON block from an LLM response string."""
-    # Strip markdown code fences if present
+    """Extract and parse the first JSON object/array from an LLM response string."""
+    # Strip markdown code fences if present.
     cleaned = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
-    return json.loads(cleaned)
+
+    # First attempt: the full response is already valid JSON.
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # Fallback: locate and decode the first JSON object/array inside extra prose.
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(cleaned):
+        if ch not in "[{":
+            continue
+        try:
+            parsed, _ = decoder.raw_decode(cleaned[i:])
+            if isinstance(parsed, (dict, list)):
+                return parsed
+        except json.JSONDecodeError:
+            continue
+
+    snippet = cleaned[:200].replace("\n", " ")
+    raise ValueError(f"Model did not return valid JSON. Response starts with: {snippet!r}")
+
+
+def _normalize_skill_list(items: object) -> list[str]:
+    """Return a de-duplicated, cleaned list of non-empty skill strings."""
+    if not isinstance(items, list):
+        return []
+
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in items:
+        if not isinstance(item, str):
+            continue
+        skill = item.strip()
+        if not skill:
+            continue
+        key = skill.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(skill)
+    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +110,9 @@ def extract_required_skills(job_description: str, llm: ChatOpenAI | None = None)
     chain = _EXTRACTION_PROMPT | llm | StrOutputParser()
     raw = chain.invoke({"job_description": job_description})
     data = _parse_json_block(raw)
-    return data.get("required_skills", [])
+    if not isinstance(data, dict):
+        return []
+    return _normalize_skill_list(data.get("required_skills", []))
 
 
 # ---------------------------------------------------------------------------
@@ -113,9 +156,11 @@ def identify_skill_gaps(
         }
     )
     data = _parse_json_block(raw)
+    if not isinstance(data, dict):
+        return {"matched_skills": [], "missing_skills": []}
     return {
-        "matched_skills": data.get("matched_skills", []),
-        "missing_skills": data.get("missing_skills", []),
+        "matched_skills": _normalize_skill_list(data.get("matched_skills", [])),
+        "missing_skills": _normalize_skill_list(data.get("missing_skills", [])),
     }
 
 
@@ -155,7 +200,10 @@ def generate_interview_questions(
     chain = _INTERVIEW_PROMPT | llm | StrOutputParser()
     raw = chain.invoke({"missing_skills": json.dumps(missing_skills)})
     data = _parse_json_block(raw)
-    return data.get("questions", [])
+    if not isinstance(data, dict):
+        return []
+    questions = data.get("questions", [])
+    return questions if isinstance(questions, list) else []
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +253,10 @@ def generate_learning_plan(
         }
     )
     data = _parse_json_block(raw)
-    return data.get("learning_plan", [])
+    if not isinstance(data, dict):
+        return []
+    plan = data.get("learning_plan", [])
+    return plan if isinstance(plan, list) else []
 
 
 # ---------------------------------------------------------------------------
@@ -230,8 +281,18 @@ def run_full_analysis(job_description: str, resume: str) -> dict:
 
     # Stage 2
     gap_data = identify_skill_gaps(required_skills, resume, llm=llm)
-    matched = gap_data["matched_skills"]
-    missing = gap_data["missing_skills"]
+    required_lut = {skill.casefold(): skill for skill in required_skills}
+
+    # Keep only skills from the required set and preserve the JD ordering.
+    matched_set = {s.casefold() for s in gap_data["matched_skills"] if s.casefold() in required_lut}
+    missing_set = {s.casefold() for s in gap_data["missing_skills"] if s.casefold() in required_lut}
+
+    matched = [skill for skill in required_skills if skill.casefold() in matched_set]
+    missing = [
+        skill
+        for skill in required_skills
+        if skill.casefold() in missing_set or skill.casefold() not in matched_set
+    ]
 
     # Calculate a simple match score
     total = len(required_skills) if required_skills else 1
