@@ -1,0 +1,227 @@
+"""
+app.py
+
+Catalyst AI-Powered Skill Assessment & Learning Agent
+Streamlit entry point
+"""
+
+from __future__ import annotations
+
+import io
+import json
+
+import streamlit as st
+
+# ── Page config must be the very first Streamlit call ──────────────────────
+st.set_page_config(
+    page_title="Catalyst – AI Skill Assessment",
+    page_icon="⚡",
+    layout="wide",
+)
+
+from agent_logic import run_full_analysis  # noqa: E402  (after set_page_config)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def extract_text_from_pdf(uploaded_file) -> str:
+    """Return plain text extracted from an uploaded PDF file."""
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        st.error("pypdf is required to parse PDFs. Run: pip install pypdf")
+        return ""
+
+    reader = PdfReader(io.BytesIO(uploaded_file.read()))
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+def render_score_gauge(score: float) -> None:
+    """Display the match score with colour-coded feedback."""
+    if score >= 75:
+        colour = "green"
+        label = "Strong Match 🟢"
+    elif score >= 50:
+        colour = "orange"
+        label = "Moderate Match 🟡"
+    else:
+        colour = "red"
+        label = "Needs Development 🔴"
+
+    st.markdown(
+        f"""
+        <div style='text-align:center; padding: 12px 0;'>
+            <span style='font-size:3rem; font-weight:700; color:{colour};'>{score}%</span><br/>
+            <span style='font-size:1.1rem;'>{label}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# UI
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    st.title("⚡ Catalyst – AI-Powered Skill Assessment & Learning Agent")
+    st.markdown(
+        "Paste a **Job Description** and your **Resume** below. "
+        "Catalyst will identify skill gaps, generate targeted interview questions, "
+        "and build a personalised learning plan for you."
+    )
+
+    st.divider()
+
+    # ── Input columns ───────────────────────────────────────────────────────
+    col_jd, col_resume = st.columns(2)
+
+    with col_jd:
+        st.subheader("📋 Job Description")
+        job_description = st.text_area(
+            "Paste the full job description here:",
+            height=320,
+            placeholder="e.g. We are looking for a senior Python developer with experience in FastAPI, "
+            "Docker, Kubernetes, PostgreSQL, and CI/CD pipelines…",
+            key="jd_input",
+        )
+
+    with col_resume:
+        st.subheader("📄 Resume")
+        resume_input_mode = st.radio(
+            "Input method:", ["Text", "PDF Upload"], horizontal=True, key="resume_mode"
+        )
+
+        resume_text = ""
+        if resume_input_mode == "Text":
+            resume_text = st.text_area(
+                "Paste your resume text here:",
+                height=280,
+                placeholder="e.g. Experienced Python developer skilled in Flask, Django, "
+                "PostgreSQL, Docker, and AWS…",
+                key="resume_text_input",
+            )
+        else:
+            uploaded = st.file_uploader("Upload your PDF resume:", type=["pdf"], key="resume_pdf")
+            if uploaded:
+                resume_text = extract_text_from_pdf(uploaded)
+                if resume_text:
+                    st.success(f"✅ Extracted {len(resume_text):,} characters from PDF.")
+                else:
+                    st.warning("Could not extract text from the PDF. Try pasting the text directly.")
+
+    st.divider()
+
+    # ── Analyse button ───────────────────────────────────────────────────────
+    analyse_btn = st.button("🔍 Analyse Skills", type="primary", use_container_width=True)
+
+    if analyse_btn:
+        if not job_description.strip():
+            st.error("Please provide a Job Description.")
+            st.stop()
+        if not resume_text.strip():
+            st.error("Please provide your Resume (text or PDF).")
+            st.stop()
+
+        with st.spinner("Running multi-stage AI analysis… this may take 20-40 seconds."):
+            try:
+                results = run_full_analysis(job_description, resume_text)
+            except EnvironmentError as exc:
+                st.error(str(exc))
+                st.stop()
+            except Exception as exc:
+                st.error(f"An unexpected error occurred: {exc}")
+                st.stop()
+
+        # ── Store results in session state so they persist on rerun ─────────
+        st.session_state["results"] = results
+
+    # ── Display results ───────────────────────────────────────────────────────
+    if "results" in st.session_state:
+        results = st.session_state["results"]
+        _render_results(results)
+
+
+def _render_results(results: dict) -> None:
+    """Render the full analysis results."""
+    st.success("✅ Analysis complete!")
+    st.divider()
+
+    # ── Overview metrics ─────────────────────────────────────────────────────
+    st.subheader("📊 Skill Match Overview")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Required Skills", len(results["required_skills"]))
+    c2.metric("Matched Skills", len(results["matched_skills"]))
+    c3.metric("Missing Skills", len(results["missing_skills"]))
+    with c4:
+        render_score_gauge(results["match_score"])
+
+    st.divider()
+
+    # ── Skills breakdown ─────────────────────────────────────────────────────
+    col_matched, col_missing = st.columns(2)
+
+    with col_matched:
+        st.subheader("✅ Matched Skills")
+        if results["matched_skills"]:
+            for skill in results["matched_skills"]:
+                st.markdown(f"- {skill}")
+        else:
+            st.info("No skills matched.")
+
+    with col_missing:
+        st.subheader("❌ Missing Skills")
+        if results["missing_skills"]:
+            for skill in results["missing_skills"]:
+                st.markdown(f"- {skill}")
+        else:
+            st.success("All required skills are present in your resume!")
+
+    st.divider()
+
+    # ── Interview questions ───────────────────────────────────────────────────
+    st.subheader("🎤 Targeted Interview Questions")
+    if results["interview_questions"]:
+        for i, item in enumerate(results["interview_questions"], start=1):
+            with st.expander(f"Q{i} – {item.get('skill', 'Skill')}"):
+                st.markdown(item.get("question", ""))
+    else:
+        st.info("No interview questions generated (no skill gaps found).")
+
+    st.divider()
+
+    # ── Learning plan ─────────────────────────────────────────────────────────
+    st.subheader("📚 Personalised Learning Plan")
+    if results["learning_plan"]:
+        for entry in results["learning_plan"]:
+            skill_name = entry.get("skill", "Unknown Skill")
+            weeks = entry.get("estimated_weeks", "?")
+            adjacent = entry.get("adjacent_skills", [])
+            resources = entry.get("resources", [])
+
+            with st.expander(f"🎯 {skill_name}  –  ~{weeks} week(s) to proficiency"):
+                if adjacent:
+                    st.markdown("**Adjacent / Complementary Skills:**")
+                    st.markdown(", ".join(f"`{s}`" for s in adjacent))
+
+                if resources:
+                    st.markdown("**Curated Resources:**")
+                    for res in resources:
+                        title = res.get("title", "Resource")
+                        url = res.get("url", "#")
+                        st.markdown(f"- [{title}]({url})")
+    else:
+        st.info("No learning plan generated (no skill gaps found).")
+
+    st.divider()
+
+    # ── Raw JSON expander (for debugging / transparency) ─────────────────────
+    with st.expander("🔧 Raw JSON Response"):
+        st.code(json.dumps(results, indent=2), language="json")
+
+
+if __name__ == "__main__":
+    main()
