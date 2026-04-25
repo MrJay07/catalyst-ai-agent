@@ -36,7 +36,7 @@ single monolithic prompt to do everything at once.
                        ▼
           ┌────────────────────────┐
           │   STAGE 2              │
-          │   Verification         │
+          │   Baseline Verification│
           │                        │
           │  Prompt: "Compare      │
           │  required skills to    │
@@ -44,23 +44,50 @@ single monolithic prompt to do everything at once.
           │  as matched/missing"   │
           │                        │
           │  Output:               │
+          │  baseline matched[]    │
+          │  baseline missing[]    │
+          └──────────┬─────────────┘
+                     │
+                     ▼
+          ┌────────────────────────┐
+          │   STAGE 3              │
+          │   Conversational Qs    │
+          │                        │
+          │  Prompt: "Ask practical│
+          │  questions per required│
+          │  skill"                │
+          │                        │
+          │  Output:               │
+          │  assessment_questions[]│
+          └──────────┬─────────────┘
+                     │ candidate answers
+                     ▼
+          ┌────────────────────────┐
+          │   STAGE 4              │
+          │   Proficiency Scoring  │
+          │                        │
+          │  Prompt: "Use resume + │
+          │  answers to rate each  │
+          │  required skill"       │
+          │                        │
+          │  Output:               │
+          │  skill_assessment[]    │
           │  matched_skills[]      │
           │  missing_skills[]      │
-          │  match_score (%)       │
           └──────────┬─────────────┘
                      │
            ┌─────────┴──────────┐
            ▼                    ▼
  ┌──────────────────┐  ┌──────────────────────┐
- │  STAGE 3a        │  │  STAGE 3b            │
+ │  STAGE 5a        │  │  STAGE 5b            │
  │  Interview       │  │  Learning Plan       │
  │  Questions       │  │  Generator           │
  │                  │  │                      │
  │  Prompt: "Write  │  │  Prompt: "Create a   │
- │  3 scenario-     │  │  learning path with  │
- │  based questions │  │  adjacent skills,    │
- │  for missing     │  │  time estimates, and │
- │  skills"         │  │  resource links"     │
+ │  3 scenario-     │  │  realistic adjacent- │
+ │  based questions │  │  skill learning plan │
+ │  for remaining   │  │  with time + links"  │
+ │  gaps"           │  │                      │
  │                  │  │                      │
  │  Output:         │  │  Output:             │
  │  questions[]     │  │  learning_plan[]     │
@@ -90,16 +117,16 @@ result reliably without regex heuristics.
 
 ---
 
-### Stage 2 – Verification
+### Stage 2 – Baseline Verification
 
-**Goal:** Map each required skill to the candidate's resume and classify it as matched or missing.
+**Goal:** Build an initial resume-only view of likely matched vs missing skills.
 
 **Inputs:**
 - `required_skills[]` (from Stage 1)
 - Resume text
 
 **Prompt strategy:** The model is instructed to compare each skill against evidence in the resume.
-The classification is intentionally binary (matched / missing) to keep the gap analysis actionable.
+This stage is used as a baseline and to prioritize which skills need deeper conversational probing.
 
 **Output schema:**
 ```json
@@ -116,7 +143,36 @@ match_score = (len(matched_skills) / len(required_skills)) × 100
 
 ---
 
-### Stage 3a – Interview Question Generation
+### Stage 3 – Conversational Assessment Questions
+
+**Goal:** Ask practical, skill-specific questions to validate claimed proficiency.
+
+**Inputs:**
+- `required_skills[]` (from Stage 1)
+- `missing_skills[]` baseline hints (from Stage 2)
+- Resume text
+
+**Prompt strategy:** Generate concise, scenario-oriented questions that can be answered with real
+work examples, trade-offs, and outcomes.
+
+---
+
+### Stage 4 – Proficiency Scoring from Answers
+
+**Goal:** Re-score each required skill using both resume evidence and candidate answers.
+
+**Inputs:**
+- `required_skills[]`
+- Resume text
+- Assessment transcript (question/answer pairs)
+
+**Output fields include:**
+- `skill_assessment[]` with per-skill proficiency level, confidence, evidence, and gap reason
+- `matched_skills[]` and `missing_skills[]` updated from conversational evidence
+
+---
+
+### Stage 5a – Interview Question Generation
 
 **Goal:** Produce three practical, scenario-based interview questions that probe real proficiency
 in the missing skills.
@@ -140,12 +196,13 @@ consistent and concise.
 
 ---
 
-### Stage 3b – Learning Plan Generation
+### Stage 5b – Learning Plan Generation
 
 **Goal:** Build a personalised upskilling roadmap for each missing skill.
 
 **Inputs:**
-- `missing_skills[]` (from Stage 2)
+- `missing_skills[]` (from Stage 4)
+- `matched_skills[]` (from Stage 4)
 - Resume snippet (first 1 500 characters, for personalisation context)
 
 **Prompt strategy:** The model is asked for adjacent skills (to broaden the candidate's mental

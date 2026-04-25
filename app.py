@@ -99,8 +99,8 @@ def main() -> None:
     st.title("⚡ Catalyst – AI-Powered Skill Assessment & Learning Agent")
     st.markdown(
         "Paste a **Job Description** and your **Resume** below. "
-        "Catalyst will identify skill gaps, generate targeted interview questions, "
-        "and build a personalised learning plan for you."
+        "Catalyst will extract required skills, run a conversational proficiency check, "
+        "identify gaps, and build a realistic personalised learning plan."
     )
 
     st.divider()
@@ -144,10 +144,14 @@ def main() -> None:
 
     st.divider()
 
-    # ── Analyse button ───────────────────────────────────────────────────────
-    analyse_btn = st.button("🔍 Analyse Skills", type="primary", use_container_width=True)
+    # ── Step 1: Generate conversational assessment questions ────────────────
+    generate_btn = st.button(
+        "1) Generate Assessment Questions",
+        type="primary",
+        use_container_width=True,
+    )
 
-    if analyse_btn:
+    if generate_btn:
         if not job_description.strip():
             st.error("Please provide a Job Description.")
             st.stop()
@@ -155,7 +159,7 @@ def main() -> None:
             st.error("Please provide your Resume (text or PDF).")
             st.stop()
 
-        with st.spinner("Running multi-stage AI analysis… this may take 20-40 seconds."):
+        with st.spinner("Creating conversational assessment questions…"):
             try:
                 results = run_full_analysis(job_description, resume_text)
             except EnvironmentError as exc:
@@ -165,8 +169,67 @@ def main() -> None:
                 st.error(format_analysis_error(exc))
                 st.stop()
 
-        # ── Store results in session state so they persist on rerun ─────────
+        # Store baseline results and user inputs for step 2.
+        st.session_state["job_description"] = job_description
+        st.session_state["resume_text"] = resume_text
         st.session_state["results"] = results
+
+    # ── Step 2: candidate answers + answer-aware reassessment ───────────────
+    current_results = st.session_state.get("results", {})
+    assessment_questions = current_results.get("assessment_questions", [])
+
+    if assessment_questions:
+        st.subheader("💬 Conversational Skill Assessment")
+        st.caption("Answer each question briefly with concrete examples from your experience.")
+
+        for i, item in enumerate(assessment_questions, start=1):
+            skill = item.get("skill", "Skill")
+            question = item.get("question", "")
+            why = item.get("why_it_matters", "")
+            st.markdown(f"**Q{i} ({skill})**: {question}")
+            if why:
+                st.caption(f"Why this matters: {why}")
+            st.text_area(
+                f"Your answer for Q{i}",
+                height=110,
+                key=f"assessment_answer_{i}",
+                placeholder="Describe what you did, your approach, trade-offs, and outcome.",
+            )
+
+        evaluate_btn = st.button("2) Evaluate Proficiency & Build Learning Plan")
+        if evaluate_btn:
+            answered_items: list[dict[str, str]] = []
+            for i, item in enumerate(assessment_questions, start=1):
+                answer = st.session_state.get(f"assessment_answer_{i}", "").strip()
+                if not answer:
+                    continue
+                answered_items.append(
+                    {
+                        "skill": item.get("skill", ""),
+                        "question": item.get("question", ""),
+                        "answer": answer,
+                    }
+                )
+
+            if not answered_items:
+                st.error("Please answer at least one assessment question before evaluation.")
+                st.stop()
+
+            with st.spinner("Re-assessing proficiency from your answers…"):
+                try:
+                    results = run_full_analysis(
+                        st.session_state.get("job_description", job_description),
+                        st.session_state.get("resume_text", resume_text),
+                        assessment_answers=answered_items,
+                    )
+                except EnvironmentError as exc:
+                    st.error(str(exc))
+                    st.stop()
+                except Exception as exc:
+                    st.error(format_analysis_error(exc))
+                    st.stop()
+
+            st.session_state["results"] = results
 
     # ── Display results ───────────────────────────────────────────────────────
     if "results" in st.session_state:
@@ -177,6 +240,33 @@ def main() -> None:
 def _render_results(results: dict) -> None:
     """Render the full analysis results."""
     st.success("✅ Analysis complete!")
+    st.divider()
+
+    # ── Conversational assessment outcomes ───────────────────────────────────
+    st.subheader("🧪 Proficiency Assessment")
+    mode = results.get("assessment_mode", "resume_only")
+    if mode == "conversational":
+        st.caption("Assessment mode: resume + candidate answers")
+    else:
+        st.caption("Assessment mode: resume-only baseline (answer questions above for deeper validation)")
+
+    skill_assessment = results.get("skill_assessment", [])
+    if skill_assessment:
+        for row in skill_assessment:
+            skill = row.get("skill", "Skill")
+            level = row.get("proficiency_level", "unknown").title()
+            confidence = row.get("confidence", 0)
+            evidence = row.get("evidence", "")
+            gap_reason = row.get("gap_reason", "")
+
+            with st.expander(f"{skill} — {level} ({confidence}% confidence)"):
+                if evidence:
+                    st.markdown(f"**Evidence:** {evidence}")
+                if gap_reason:
+                    st.markdown(f"**Gap reason:** {gap_reason}")
+    else:
+        st.info("No per-skill proficiency details yet. Submit assessment answers to generate this view.")
+
     st.divider()
 
     # ── Overview metrics ─────────────────────────────────────────────────────

@@ -1,11 +1,14 @@
 # ⚡ Catalyst – AI-Powered Skill Assessment & Learning Agent
 
-Catalyst is a hackathon prototype that uses a **multi-stage LLM chain** to help candidates understand their readiness for a specific job role. Given a Job Description and a Resume, Catalyst:
+[![Test Suite](https://github.com/MrJay07/catalyst-ai-agent/actions/workflows/tests.yml/badge.svg)](https://github.com/MrJay07/catalyst-ai-agent/actions/workflows/tests.yml)
+
+Catalyst is a hackathon prototype that uses a **multi-stage LLM chain** to assess real proficiency, not just resume claims. Given a Job Description and a Resume, Catalyst:
 
 1. **Extracts** all required technical and soft skills from the JD.
-2. **Verifies** which skills are present in the resume and which are missing.
-3. **Generates** three targeted interview questions to assess real-world proficiency in missing skills.
-4. **Produces** a personalised learning plan with adjacent skills, time estimates, and curated resource links.
+2. **Builds conversational assessment questions** tailored to likely weak/missing skills.
+3. **Evaluates candidate answers** to score proficiency per required skill.
+4. **Generates** three targeted interview questions for remaining gaps.
+5. **Produces** a personalised learning plan with realistic adjacent skills, time estimates, and curated resource links.
 
 ---
 
@@ -34,11 +37,23 @@ Job Description + Resume
   │ Verification│  → matched_skills[], missing_skills[], match_score
   └──────┬──────┘
          │
+         ▼
+  ┌─────────────┐
+  │  Stage 3    │  Conversational Assessment  (GPT-4o-mini)
+  │  Questions  │  → assessment_questions[]
+  └──────┬──────┘
+         │ candidate answers
+         ▼
+  ┌─────────────┐
+  │  Stage 4    │  Proficiency Scoring  (GPT-4o-mini)
+  │  Evaluate   │  → skill_assessment[], updated gaps
+  └──────┬──────┘
+         │
     ┌────┴────┐
     ▼         ▼
 ┌───────┐  ┌──────────────┐
-│ 3a    │  │ 3b           │
-│ Inter-│  │ Learning Plan│  (GPT-4o-mini, parallel)
+│ 5a    │  │ 5b           │
+│ Inter-│  │ Learning Plan│
 │ view  │  │ Generator    │
 │ Qs    │  └──────────────┘
 └───────┘
@@ -78,7 +93,31 @@ pip install -r requirements.txt
 Create a `.env` file in the project root:
 
 ```env
+# Provider selection: openai (default) or gemini
+LLM_PROVIDER=openai
+
+# Model name for the selected provider
+LLM_MODEL=gpt-4o-mini
+
+# Generic key variable (recommended)
+LLM_API_KEY=your-key-here
+
+# Optional provider-specific keys (either is fine)
 OPENAI_API_KEY=sk-...your-key-here...
+GEMINI_API_KEY=your-gemini-key-here
+
+# Optional: OpenAI-compatible base URL (OpenRouter, Groq OpenAI-compatible APIs, etc.)
+# LLM_BASE_URL=https://openrouter.ai/api/v1
+```
+
+#### Use Gemini API
+
+To use Gemini, set the following in `.env`:
+
+```env
+LLM_PROVIDER=gemini
+LLM_MODEL=gemini-1.5-flash
+GEMINI_API_KEY=your-gemini-api-key
 ```
 
 ### 5. Run the app

@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from typing import Any
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
@@ -26,15 +27,51 @@ load_dotenv()
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-def _build_llm(model: str = "gpt-4o-mini", temperature: float = 0.3) -> ChatOpenAI:
-    """Return a configured ChatOpenAI instance."""
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise EnvironmentError(
-            "OPENAI_API_KEY is not set. "
-            "Add it to a .env file or export it in your shell."
+def _build_llm(model: str = "gpt-4o-mini", temperature: float = 0.3) -> Any:
+    """Return a configured chat model instance for the selected provider."""
+    provider = os.getenv("LLM_PROVIDER", "openai").strip().lower()
+
+    if provider == "gemini":
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+        except ImportError as exc:
+            raise EnvironmentError(
+                "Gemini provider selected but dependency is missing. "
+                "Install it with: pip install langchain-google-genai"
+            ) from exc
+
+        gemini_model = os.getenv("LLM_MODEL", "gemini-1.5-flash")
+        gemini_key = os.getenv("LLM_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if not gemini_key:
+            raise EnvironmentError(
+                "Gemini provider selected but API key is missing. "
+                "Set GEMINI_API_KEY or LLM_API_KEY in your .env file."
+            )
+
+        return ChatGoogleGenerativeAI(
+            model=gemini_model,
+            temperature=temperature,
+            google_api_key=gemini_key,
         )
-    return ChatOpenAI(model=model, temperature=temperature, openai_api_key=api_key)
+
+    openai_model = os.getenv("LLM_MODEL", model)
+    openai_key = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
+    if not openai_key:
+        raise EnvironmentError(
+            "OpenAI API key is not set. "
+            "Set OPENAI_API_KEY or LLM_API_KEY in your .env file."
+        )
+
+    base_url = os.getenv("LLM_BASE_URL")
+    if base_url:
+        return ChatOpenAI(
+            model=openai_model,
+            temperature=temperature,
+            openai_api_key=openai_key,
+            base_url=base_url,
+        )
+
+    return ChatOpenAI(model=openai_model, temperature=temperature, openai_api_key=openai_key)
 
 
 def _parse_json_block(text: str) -> dict | list:
@@ -228,7 +265,9 @@ _LEARNING_PLAN_PROMPT = ChatPromptTemplate.from_messages(
         ),
         (
             "human",
-            "Missing skills:\n{missing_skills}\n\nCandidate resume summary:\n{resume_snippet}",
+            "Missing skills:\n{missing_skills}\n\n"
+            "Candidate strengths already demonstrated:\n{matched_skills}\n\n"
+            "Candidate resume summary:\n{resume_snippet}",
         ),
     ]
 )
@@ -237,6 +276,7 @@ _LEARNING_PLAN_PROMPT = ChatPromptTemplate.from_messages(
 def generate_learning_plan(
     missing_skills: list[str],
     resume: str,
+    matched_skills: list[str] | None = None,
     llm: ChatOpenAI | None = None,
 ) -> list[dict]:
     """Stage 3b – Generate a personalised learning path with adjacent skills and resources.
@@ -249,6 +289,7 @@ def generate_learning_plan(
     raw = chain.invoke(
         {
             "missing_skills": json.dumps(missing_skills),
+            "matched_skills": json.dumps(matched_skills or []),
             "resume_snippet": resume[:1500],
         }
     )
@@ -260,10 +301,155 @@ def generate_learning_plan(
 
 
 # ---------------------------------------------------------------------------
+# Stage 3c – Conversational Proficiency Assessment
+# ---------------------------------------------------------------------------
+
+_ASSESSMENT_QUESTIONS_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            "You are a senior hiring manager running a conversational skill assessment. "
+            "Generate concise, practical questions to verify real proficiency in required skills. "
+            "Ask up to 1 question per skill (maximum 6 total). "
+            "Prioritize skills that are missing or weakly evidenced in the resume. "
+            "Return ONLY valid JSON with key 'questions' containing objects with keys: "
+            "'skill', 'question', and 'why_it_matters'. No markdown fences.",
+        ),
+        (
+            "human",
+            "Required skills:\n{required_skills}\n\n"
+            "Skills likely missing from resume:\n{missing_skills}\n\n"
+            "Resume:\n{resume}",
+        ),
+    ]
+)
+
+
+def generate_assessment_questions(
+    required_skills: list[str],
+    resume: str,
+    missing_skills: list[str] | None = None,
+    llm: ChatOpenAI | None = None,
+) -> list[dict[str, str]]:
+    """Generate a short conversational interview question set per required skill."""
+    llm = llm or _build_llm()
+    chain = _ASSESSMENT_QUESTIONS_PROMPT | llm | StrOutputParser()
+    raw = chain.invoke(
+        {
+            "required_skills": json.dumps(required_skills),
+            "missing_skills": json.dumps(missing_skills or []),
+            "resume": resume[:2000],
+        }
+    )
+    data = _parse_json_block(raw)
+    if not isinstance(data, dict):
+        return []
+
+    questions = data.get("questions", [])
+    if not isinstance(questions, list):
+        return []
+
+    cleaned: list[dict[str, str]] = []
+    for item in questions:
+        if not isinstance(item, dict):
+            continue
+        skill = str(item.get("skill", "")).strip()
+        question = str(item.get("question", "")).strip()
+        why = str(item.get("why_it_matters", "")).strip()
+        if not skill or not question:
+            continue
+        cleaned.append({"skill": skill, "question": question, "why_it_matters": why})
+
+    return cleaned[:6]
+
+
+_PROFICIENCY_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            "You are evaluating true skill proficiency using resume evidence and interview answers. "
+            "Rate each required skill with one of: strong, working, beginner, missing. "
+            "Return ONLY valid JSON with keys: "
+            "'skill_assessment' (list of objects with keys 'skill', 'proficiency_level', "
+            "'confidence' integer 0-100, 'evidence', 'gap_reason'), "
+            "'matched_skills' (strong/working), and 'missing_skills' (beginner/missing). "
+            "No markdown fences.",
+        ),
+        (
+            "human",
+            "Required skills:\n{required_skills}\n\n"
+            "Resume:\n{resume}\n\n"
+            "Assessment transcript (question/answer pairs):\n{assessment_transcript}",
+        ),
+    ]
+)
+
+
+def assess_skill_proficiency(
+    required_skills: list[str],
+    resume: str,
+    assessment_answers: list[dict[str, str]],
+    llm: ChatOpenAI | None = None,
+) -> dict[str, Any]:
+    """Score proficiency per required skill from resume evidence + interview answers."""
+    llm = llm or _build_llm()
+    chain = _PROFICIENCY_PROMPT | llm | StrOutputParser()
+    raw = chain.invoke(
+        {
+            "required_skills": json.dumps(required_skills),
+            "resume": resume[:2500],
+            "assessment_transcript": json.dumps(assessment_answers),
+        }
+    )
+
+    data = _parse_json_block(raw)
+    if not isinstance(data, dict):
+        return {"skill_assessment": [], "matched_skills": [], "missing_skills": []}
+
+    skill_assessment = data.get("skill_assessment", [])
+    cleaned_assessment: list[dict[str, Any]] = []
+    if isinstance(skill_assessment, list):
+        for row in skill_assessment:
+            if not isinstance(row, dict):
+                continue
+            skill = str(row.get("skill", "")).strip()
+            level = str(row.get("proficiency_level", "")).strip().lower()
+            if not skill or level not in {"strong", "working", "beginner", "missing"}:
+                continue
+
+            confidence_raw = row.get("confidence", 0)
+            confidence = 0
+            if isinstance(confidence_raw, (int, float)):
+                confidence = max(0, min(100, int(confidence_raw)))
+
+            cleaned_assessment.append(
+                {
+                    "skill": skill,
+                    "proficiency_level": level,
+                    "confidence": confidence,
+                    "evidence": str(row.get("evidence", "")).strip(),
+                    "gap_reason": str(row.get("gap_reason", "")).strip(),
+                }
+            )
+
+    matched = _normalize_skill_list(data.get("matched_skills", []))
+    missing = _normalize_skill_list(data.get("missing_skills", []))
+    return {
+        "skill_assessment": cleaned_assessment,
+        "matched_skills": matched,
+        "missing_skills": missing,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Convenience – run the full pipeline
 # ---------------------------------------------------------------------------
 
-def run_full_analysis(job_description: str, resume: str) -> dict:
+def run_full_analysis(
+    job_description: str,
+    resume: str,
+    assessment_answers: list[dict[str, str]] | None = None,
+) -> dict:
     """Run all three stages and return a consolidated result dict.
 
     Keys in the returned dict:
@@ -271,7 +457,9 @@ def run_full_analysis(job_description: str, resume: str) -> dict:
       - matched_skills   : list[str]
       - missing_skills   : list[str]
       - match_score      : float  (0–100, percentage of required skills matched)
-      - interview_questions : list[dict]
+            - assessment_questions: list[dict]
+            - skill_assessment  : list[dict]
+            - interview_questions : list[dict]
       - learning_plan    : list[dict]
     """
     llm = _build_llm()
@@ -279,7 +467,7 @@ def run_full_analysis(job_description: str, resume: str) -> dict:
     # Stage 1
     required_skills = extract_required_skills(job_description, llm=llm)
 
-    # Stage 2
+    # Stage 2 (resume-based baseline)
     gap_data = identify_skill_gaps(required_skills, resume, llm=llm)
     required_lut = {skill.casefold(): skill for skill in required_skills}
 
@@ -287,21 +475,48 @@ def run_full_analysis(job_description: str, resume: str) -> dict:
     matched_set = {s.casefold() for s in gap_data["matched_skills"] if s.casefold() in required_lut}
     missing_set = {s.casefold() for s in gap_data["missing_skills"] if s.casefold() in required_lut}
 
-    matched = [skill for skill in required_skills if skill.casefold() in matched_set]
-    missing = [
+    baseline_matched = [skill for skill in required_skills if skill.casefold() in matched_set]
+    baseline_missing = [
         skill
         for skill in required_skills
         if skill.casefold() in missing_set or skill.casefold() not in matched_set
     ]
 
-    # Calculate a simple match score
+    # Stage 3c (conversational): create question set, then optionally rescore from answers.
+    assessment_questions = generate_assessment_questions(
+        required_skills,
+        resume,
+        missing_skills=baseline_missing,
+        llm=llm,
+    )
+
+    skill_assessment: list[dict[str, Any]] = []
+    if assessment_answers:
+        proficiency = assess_skill_proficiency(required_skills, resume, assessment_answers, llm=llm)
+        p_matched_set = {
+            s.casefold() for s in proficiency["matched_skills"] if s.casefold() in required_lut
+        }
+        p_missing_set = {
+            s.casefold() for s in proficiency["missing_skills"] if s.casefold() in required_lut
+        }
+        matched = [skill for skill in required_skills if skill.casefold() in p_matched_set]
+        missing = [
+            skill
+            for skill in required_skills
+            if skill.casefold() in p_missing_set or skill.casefold() not in p_matched_set
+        ]
+        skill_assessment = proficiency["skill_assessment"]
+    else:
+        matched = baseline_matched
+        missing = baseline_missing
+
     total = len(required_skills) if required_skills else 1
     match_score = round(len(matched) / total * 100, 1)
 
     # Stage 3 (only if there are missing skills)
     if missing:
         questions = generate_interview_questions(missing, llm=llm)
-        plan = generate_learning_plan(missing, resume, llm=llm)
+        plan = generate_learning_plan(missing, resume, matched_skills=matched, llm=llm)
     else:
         questions = []
         plan = []
@@ -311,6 +526,9 @@ def run_full_analysis(job_description: str, resume: str) -> dict:
         "matched_skills": matched,
         "missing_skills": missing,
         "match_score": match_score,
+        "assessment_questions": assessment_questions,
+        "skill_assessment": skill_assessment,
+        "assessment_mode": "conversational" if assessment_answers else "resume_only",
         "interview_questions": questions,
         "learning_plan": plan,
     }
