@@ -27,25 +27,25 @@ Job Description + Resume
         │
         ▼
   ┌─────────────┐
-  │  Stage 1    │  Skill Extraction  (GPT-4o-mini)
+       │  Stage 1    │  Skill Extraction  (Gemini 2.0 Flash)
   │  Extraction │  → required_skills[]
   └──────┬──────┘
          │
          ▼
   ┌─────────────┐
-  │  Stage 2    │  Gap Verification  (GPT-4o-mini)
+       │  Stage 2    │  Gap Verification  (Gemini 2.0 Flash)
   │ Verification│  → matched_skills[], missing_skills[], match_score
   └──────┬──────┘
          │
          ▼
   ┌─────────────┐
-  │  Stage 3    │  Conversational Assessment  (GPT-4o-mini)
+       │  Stage 3    │  Conversational Assessment  (Gemini 2.0 Flash)
   │  Questions  │  → assessment_questions[]
   └──────┬──────┘
          │ candidate answers
          ▼
   ┌─────────────┐
-  │  Stage 4    │  Proficiency Scoring  (GPT-4o-mini)
+       │  Stage 4    │  Proficiency Scoring  (Gemini 2.0 Flash)
   │  Evaluate   │  → skill_assessment[], updated gaps
   └──────┬──────┘
          │
@@ -66,7 +66,7 @@ Job Description + Resume
 ### Prerequisites
 
 - Python 3.10+
-- An [OpenAI API key](https://platform.openai.com/api-keys)
+- A [Google AI Studio API key](https://aistudio.google.com/app/apikey)
 
 ### 1. Clone the repository
 
@@ -93,11 +93,11 @@ pip install -r requirements.txt
 Create a `.env` file in the project root:
 
 ```env
-# Provider selection: openai (default) or gemini
-LLM_PROVIDER=openai
+# Provider selection: gemini (default) or openai
+LLM_PROVIDER=gemini
 
 # Model name for the selected provider
-LLM_MODEL=gpt-4o-mini
+LLM_MODEL=gemini-2.0-flash
 
 # Generic key variable (recommended)
 LLM_API_KEY=your-key-here
@@ -110,14 +110,14 @@ GEMINI_API_KEY=your-gemini-key-here
 # LLM_BASE_URL=https://openrouter.ai/api/v1
 ```
 
-#### Use Gemini API
+#### Use OpenAI instead (optional)
 
-To use Gemini, set the following in `.env`:
+If you prefer OpenAI, set the following in `.env`:
 
 ```env
-LLM_PROVIDER=gemini
-LLM_MODEL=gemini-1.5-flash
-GEMINI_API_KEY=your-gemini-api-key
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4o-mini
+OPENAI_API_KEY=sk-...your-key-here...
 ```
 
 ### 5. Run the app
@@ -161,7 +161,7 @@ catalyst-ai-agent/
 |--------------------|-------------------------------------|
 | Web UI             | [Streamlit](https://streamlit.io)   |
 | Agent Orchestration| [LangChain](https://langchain.com)  |
-| LLM Provider       | OpenAI GPT-4o-mini                  |
+| LLM Provider       | Gemini 2.0 Flash (default), OpenAI optional |
 | PDF Parsing        | [pypdf](https://pypdf.readthedocs.io) |
 | Config Management  | python-dotenv                       |
 

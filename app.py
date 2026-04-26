@@ -75,20 +75,47 @@ def format_analysis_error(exc: Exception) -> str:
 
     if "insufficient_quota" in lower or "exceeded your current quota" in lower:
         return (
-            "OpenAI quota has been exceeded for this API key. "
-            "Check your OpenAI billing/usage, then retry."
+            "API quota has been exceeded for this key. "
+            "Check your provider billing/usage, then retry."
         )
 
     if "rate limit" in lower or "error code: 429" in lower:
-        return "OpenAI rate limit reached. Please wait a moment and try again."
+        return "Provider rate limit reached. Please wait a moment and try again."
 
     if "invalid_api_key" in lower or "incorrect api key" in lower:
-        return "OPENAI_API_KEY appears invalid. Update your .env file and retry."
+        return "Your API key appears invalid. Update GEMINI_API_KEY (or LLM_API_KEY) and retry."
 
     if "authentication" in lower or "401" in lower:
-        return "OpenAI authentication failed. Verify OPENAI_API_KEY and account access."
+        return "Provider authentication failed. Verify your API key and account access."
+
+    if "model did not return valid json" in lower:
+        return (
+            "The model returned an unexpected response format. "
+            "Please run the analysis again; if this persists, try a different model in your .env "
+            "(for example, LLM_MODEL=gemini-2.0-flash)."
+        )
 
     return f"An unexpected error occurred: {text}"
+
+
+def run_analysis_or_stop(
+    job_description: str,
+    resume_text: str,
+    assessment_answers: list[dict[str, str]] | None = None,
+) -> dict:
+    """Run analysis and stop the Streamlit flow with a friendly error when it fails."""
+    try:
+        return run_full_analysis(
+            job_description,
+            resume_text,
+            assessment_answers=assessment_answers,
+        )
+    except EnvironmentError as exc:
+        st.error(str(exc))
+        st.stop()
+    except Exception as exc:
+        st.error(format_analysis_error(exc))
+        st.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -160,14 +187,7 @@ def main() -> None:
             st.stop()
 
         with st.spinner("Creating conversational assessment questions…"):
-            try:
-                results = run_full_analysis(job_description, resume_text)
-            except EnvironmentError as exc:
-                st.error(str(exc))
-                st.stop()
-            except Exception as exc:
-                st.error(format_analysis_error(exc))
-                st.stop()
+            results = run_analysis_or_stop(job_description, resume_text)
 
         # Store baseline results and user inputs for step 2.
         st.session_state["job_description"] = job_description
@@ -216,18 +236,11 @@ def main() -> None:
                 st.stop()
 
             with st.spinner("Re-assessing proficiency from your answers…"):
-                try:
-                    results = run_full_analysis(
-                        st.session_state.get("job_description", job_description),
-                        st.session_state.get("resume_text", resume_text),
-                        assessment_answers=answered_items,
-                    )
-                except EnvironmentError as exc:
-                    st.error(str(exc))
-                    st.stop()
-                except Exception as exc:
-                    st.error(format_analysis_error(exc))
-                    st.stop()
+                results = run_analysis_or_stop(
+                    st.session_state.get("job_description", job_description),
+                    st.session_state.get("resume_text", resume_text),
+                    assessment_answers=answered_items,
+                )
 
             st.session_state["results"] = results
 

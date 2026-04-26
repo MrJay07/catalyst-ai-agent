@@ -2,7 +2,7 @@
 
 ## Overview
 
-Catalyst uses a **multi-stage LLM chain** built on LangChain and OpenAI's GPT-4o-mini model.
+Catalyst uses a **multi-stage LLM chain** built on LangChain with Gemini 2.0 Flash as the default model.
 Each stage has a dedicated, narrowly scoped prompt so that the LLM produces structured JSON output
 that can be parsed deterministically. This avoids the reliability issues that arise from asking a
 single monolithic prompt to do everything at once.
@@ -234,9 +234,9 @@ the model cannot confirm an authoritative source.
 |---|---|
 | **Separate prompts per stage** | Smaller, focused prompts produce more accurate and consistent JSON than monolithic "do-everything" prompts. |
 | **JSON-only output constraint** | Eliminates the need for regex parsing and reduces hallucination noise in the structured fields. |
-| **GPT-4o-mini** | Balances quality and cost for a hackathon prototype. Swap `model` in `_build_llm()` for a stronger model if needed. |
+| **Gemini 2.0 Flash (default)** | Fast, low-cost default suitable for prototype and free-tier usage. You can switch provider/model in environment variables. |
 | **Resume truncation at 1 500 chars (Stage 3b)** | Keeps the prompt within context budget while still providing enough personalisation signal. |
-| **Single shared `ChatOpenAI` instance** | Reduces object-creation overhead when all stages run sequentially in `run_full_analysis()`. |
+| **Single shared chat-model instance** | Reduces object-creation overhead when all stages run sequentially in `run_full_analysis()`. |
 | **`python-dotenv` for secrets** | Keeps API keys out of source control. |
 
 ---
