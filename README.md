@@ -11,7 +11,10 @@ Catalyst is a hackathon prototype that uses a **multi-stage LLM chain** to asses
 5. **Produces** a personalised learning plan with realistic adjacent skills, time estimates, and curated resource links.
 
 ---
+## 🌐 Project Working URL
+[https://catalyst-ai-agent-cn9mvpqwee46nqyqwcwa8w.streamlit.app/](https://catalyst-ai-agent-cn9mvpqwee46nqyqwcwa8w.streamlit.app/)
 
+---
 ## 🖥️ Demo Screenshot
 
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/b128ddd4-3a24-4242-aed1-d9eb7a0fb148" />
