@@ -14,7 +14,15 @@ Catalyst is a hackathon prototype that uses a **multi-stage LLM chain** to asses
 
 ## 🖥️ Demo Screenshot
 
-> Run the app locally (see setup below) and open `http://localhost:8501`.
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/b128ddd4-3a24-4242-aed1-d9eb7a0fb148" />
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/b207ccb3-fbcb-4641-b1aa-ace553ae2390" />
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/8e49b7f9-94c9-4517-b61c-c2a82c239fc0" />
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/202ce4ba-ca61-4570-893f-504fc1819473" />
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/8b4163c1-cad3-43d8-861f-b8b16c4aa350" />
+
+
+
+
 
 ---
 
@@ -27,25 +35,25 @@ Job Description + Resume
         │
         ▼
   ┌─────────────┐
-       │  Stage 1    │  Skill Extraction  (Gemini 2.0 Flash)
+       │  Stage 1    │  Skill Extraction  (Gemini 2.5 Flash)
   │  Extraction │  → required_skills[]
   └──────┬──────┘
          │
          ▼
   ┌─────────────┐
-       │  Stage 2    │  Gap Verification  (Gemini 2.0 Flash)
+       │  Stage 2    │  Gap Verification  (Gemini 2.5 Flash)
   │ Verification│  → matched_skills[], missing_skills[], match_score
   └──────┬──────┘
          │
          ▼
   ┌─────────────┐
-       │  Stage 3    │  Conversational Assessment  (Gemini 2.0 Flash)
+       │  Stage 3    │  Conversational Assessment  (Gemini 2.5 Flash)
   │  Questions  │  → assessment_questions[]
   └──────┬──────┘
          │ candidate answers
          ▼
   ┌─────────────┐
-       │  Stage 4    │  Proficiency Scoring  (Gemini 2.0 Flash)
+       │  Stage 4    │  Proficiency Scoring  (Gemini 2.5 Flash)
   │  Evaluate   │  → skill_assessment[], updated gaps
   └──────┬──────┘
          │
@@ -97,7 +105,7 @@ Create a `.env` file in the project root:
 LLM_PROVIDER=gemini
 
 # Model name for the selected provider
-LLM_MODEL=gemini-2.0-flash
+LLM_MODEL=gemini-2.5-flash
 
 # Generic key variable (recommended)
 LLM_API_KEY=your-key-here
@@ -161,7 +169,7 @@ catalyst-ai-agent/
 |--------------------|-------------------------------------|
 | Web UI             | [Streamlit](https://streamlit.io)   |
 | Agent Orchestration| [LangChain](https://langchain.com)  |
-| LLM Provider       | Gemini 2.0 Flash (default), OpenAI optional |
+| LLM Provider       | Gemini 2.5 Flash (default), OpenAI optional |
 | PDF Parsing        | [pypdf](https://pypdf.readthedocs.io) |
 | Config Management  | python-dotenv                       |
 
