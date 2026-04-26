@@ -173,7 +173,7 @@ def main() -> None:
 
     # ── Step 1: Generate conversational assessment questions ────────────────
     generate_btn = st.button(
-        "1) Generate Assessment Questions",
+        "Generate Assessment Questions",
         type="primary",
         use_container_width=True,
     )
@@ -216,7 +216,7 @@ def main() -> None:
                 placeholder="Describe what you did, your approach, trade-offs, and outcome.",
             )
 
-        evaluate_btn = st.button("2) Evaluate Proficiency & Build Learning Plan")
+        evaluate_btn = st.button("Evaluate Proficiency & Build Learning Plan")
         if evaluate_btn:
             answered_items: list[dict[str, str]] = []
             for i, item in enumerate(assessment_questions, start=1):
